@@ -1,0 +1,75 @@
+import csv
+from pathlib import Path
+from simnibs import sim_struct, run_simnibs
+
+HUGE_FLOAT = 1e100
+
+# Path to the charm folder
+charm_path = Path("path/to/charm/hcp")
+
+# Path to the coil file
+coil_file = Path("Drakaki_BrainStim_2022") / "MagVenture_Cool-B65.ccd"
+
+# Automatically get subject IDs from the charm folder
+subjects = [f.name for f in charm_path.iterdir() if f.is_dir()]
+
+# Function to get C3 and F3 coordinates from the CSV file
+def get_coords(subject_path):
+    csv_file = subject_path / "eeg_positions" / "EEG10-10_UI_jurak_2007.csv"
+    with csv_file.open(newline="") as csvfile:
+        reader = csv.reader(csvfile)
+        rows = list(reader)
+
+        # C3 coordinates (row 34, index 33)
+        c3_x = float(rows[33][1])
+        c3_y = float(rows[33][2])
+        c3_z = float(rows[33][3])
+
+        # F3 coordinates (row 12, index 11)
+        f3_x = float(rows[11][1])
+        f3_y = float(rows[11][2])
+        f3_z = float(rows[11][3])
+
+        return (c3_x, c3_y, c3_z), (f3_x, f3_y, f3_z)
+
+# Create main results folder
+output_root = Path("simulation_outputs")
+output_root.mkdir(exist_ok=True)
+
+# Run the simulation for each subject
+for sub in subjects:
+    s = sim_struct.SESSION()
+    s.map_to_surf = True
+    s.map_to_fsavg = True
+    s.map_to_vol = True
+    s.map_to_MNI = True
+    s.fields = "eEjJ"
+
+    # Path to subject head model
+    s.subpath = str(charm_path / sub / f"m2m_{sub}")
+
+    # Output folder
+    s.pathfem = str(output_root / sub)
+    s.open_in_gmsh = False
+
+    # Create TMS simulation list
+    tmslist = s.add_tmslist()
+    tmslist.fnamecoil = str(coil_file)
+
+    # Get the coordinates for C3 and F3
+    (c3_x, c3_y, c3_z), (f3_x, f3_y, f3_z) = get_coords(Path(s.subpath))
+
+    # Add position for C3
+    pos_c3 = tmslist.add_position()
+    pos_c3.centre = [c3_x, c3_y, c3_z]
+    pos_c3.pos_ydir = [HUGE_FLOAT, HUGE_FLOAT, 0.0]
+    pos_c3.didt = 75e6
+
+    # Add position for F3
+    pos_f3 = tmslist.add_position()
+    pos_f3.centre = [f3_x, f3_y, f3_z]
+    pos_f3.pos_ydir = [HUGE_FLOAT, HUGE_FLOAT, 0.0]
+    pos_f3.didt = 89e6
+
+    # Run the simulation
+    run_simnibs(s)
